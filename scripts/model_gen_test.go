@@ -78,6 +78,51 @@ func TestSanitizeSchemaHandlesSchemaWithoutRootProfiles(t *testing.T) {
 	}
 }
 
+func TestSanitizeSchemaUsesNestedDictionaryTypesForV180(t *testing.T) {
+	schema := map[string]interface{}{
+		"classes": map[string]interface{}{
+			"sample_class": map[string]interface{}{
+				"attributes": map[string]interface{}{
+					"name": map[string]interface{}{"type": "string_t", "requirement": "optional"},
+				},
+			},
+		},
+		"objects": map[string]interface{}{
+			"sample_object": map[string]interface{}{
+				"attributes": map[string]interface{}{},
+			},
+		},
+		"dictionary": map[string]interface{}{
+			"types": map[string]interface{}{
+				"attributes": map[string]interface{}{
+					"string_t":  map[string]interface{}{"caption": "String"},
+					"integer_t": map[string]interface{}{"caption": "Integer"},
+				},
+			},
+		},
+	}
+
+	classes, objects, types := sanitizeSchema(schema)
+	if classes == nil || objects == nil || types == nil {
+		t.Fatalf("expected non-nil sanitized maps")
+	}
+
+	if _, ok := types["string_t"]; !ok {
+		t.Fatalf("expected string_t to be read from dictionary.types.attributes")
+	}
+	if _, ok := types["integer_t"]; !ok {
+		t.Fatalf("expected integer_t to be read from dictionary.types.attributes")
+	}
+
+	resolved, err := resolveOCSFType("integer_t", types)
+	if err != nil {
+		t.Fatalf("resolveOCSFType() unexpected error: %v", err)
+	}
+	if resolved != "int32" {
+		t.Fatalf("resolveOCSFType() = %q, want %q", resolved, "int32")
+	}
+}
+
 func TestResolveOCSFTypeResolvesAliases(t *testing.T) {
 	types := map[string]interface{}{
 		"string_t": map[string]interface{}{"caption": "String"},
@@ -132,6 +177,48 @@ func TestGenerateGoStructObjectTUsesObjectType(t *testing.T) {
 	}
 	if !strings.Contains(generated, "Type: UserStruct") {
 		t.Fatalf("generated arrow fields did not contain expected object_t arrow type")
+	}
+}
+
+func TestGenerateGoStructEscapesMultilineDescriptionsAsComments(t *testing.T) {
+	resetGeneratorGlobals()
+
+	tmpDir := t.TempDir()
+	class := map[string]interface{}{
+		"name":    "sample_class",
+		"caption": "Sample Class",
+		"attributes": map[string]interface{}{
+			"app_protocol_name": map[string]interface{}{
+				"caption":     "Application Protocol Name",
+				"description": "First line\n<p>Second line</p>",
+				"type":        "string_t",
+				"requirement": "optional",
+				"is_array":    false,
+			},
+		},
+	}
+	types := map[string]interface{}{
+		"string_t": map[string]interface{}{"caption": "String"},
+	}
+
+	err := generateGoStruct("v1_8_0", tmpDir, class, map[string]interface{}{}, types, nil)
+	if err != nil {
+		t.Fatalf("generateGoStruct() unexpected error: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(tmpDir, "sample_class.go"))
+	if err != nil {
+		t.Fatalf("failed reading generated file: %v", err)
+	}
+	generated := strings.ReplaceAll(string(content), "\r\n", "\n")
+	if !strings.Contains(generated, "Application Protocol Name: First line") {
+		t.Fatalf("generated comments did not preserve multiline descriptions as valid line comments")
+	}
+	if !strings.Contains(generated, "// <p>Second line</p>") {
+		t.Fatalf("generated comments did not preserve multiline descriptions as valid line comments")
+	}
+	if strings.Contains(generated, "\n<p>Second line</p>\nAppProtocolName") {
+		t.Fatalf("generated file contains an uncommented multiline description")
 	}
 }
 
