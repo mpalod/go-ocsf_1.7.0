@@ -186,11 +186,12 @@ func nestedMap(current map[string]interface{}, path ...string) (map[string]inter
 func formatFieldComment(caption, description string) string {
 	description = strings.ReplaceAll(description, "\r\n", "\n")
 	description = strings.ReplaceAll(description, "\r", "\n")
-	lines := strings.Split(description, "\n")
-	if len(lines) == 0 {
+	description = strings.TrimRight(description, "\n")
+	if strings.TrimSpace(description) == "" {
 		return fmt.Sprintf("\n// %s:\n", caption)
 	}
 
+	lines := strings.Split(description, "\n")
 	lines[0] = fmt.Sprintf("// %s: %s", caption, lines[0])
 	for idx := 1; idx < len(lines); idx++ {
 		lines[idx] = "// " + lines[idx]
