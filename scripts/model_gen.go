@@ -49,6 +49,11 @@ func main() {
 			Package: "v1_7_0",
 			Dir:     "../ocsf/v1_7_0",
 		},
+		{
+			Version: "1.8.0",
+			Package: "v1_8_0",
+			Dir:     "../ocsf/v1_8_0",
+		},
 	}
 
 	for _, genSpec := range toGenerate {
@@ -140,8 +145,11 @@ func sanitizeSchema(schema map[string]interface{}) (classes, objects, types map[
 
 	types, ok = schema["types"].(map[string]interface{})
 	if !ok {
-		log.Println("Error: schema does not contain 'types' key or it has unexpected type")
-		return nil, nil, nil
+		types, ok = nestedMap(schema, "dictionary", "types", "attributes")
+		if !ok {
+			log.Println("Error: schema does not contain top-level 'types' or nested 'dictionary.types.attributes'")
+			return nil, nil, nil
+		}
 	}
 
 	removeProfileFields(classes)
@@ -151,6 +159,44 @@ func sanitizeSchema(schema map[string]interface{}) (classes, objects, types map[
 	removeDTFields(classes)
 
 	return classes, objects, types
+}
+
+func nestedMap(current map[string]interface{}, path ...string) (map[string]interface{}, bool) {
+	var node interface{} = current
+	for _, key := range path {
+		m, ok := node.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+
+		node, ok = m[key]
+		if !ok {
+			return nil, false
+		}
+	}
+
+	result, ok := node.(map[string]interface{})
+	if !ok {
+		return nil, false
+	}
+
+	return result, true
+}
+
+func formatFieldComment(caption, description string) string {
+	description = strings.ReplaceAll(description, "\r\n", "\n")
+	description = strings.ReplaceAll(description, "\r", "\n")
+	lines := strings.Split(description, "\n")
+	if len(lines) == 0 {
+		return fmt.Sprintf("\n// %s:\n", caption)
+	}
+
+	lines[0] = fmt.Sprintf("// %s: %s", caption, lines[0])
+	for idx := 1; idx < len(lines); idx++ {
+		lines[idx] = "// " + lines[idx]
+	}
+
+	return "\n" + strings.Join(lines, "\n") + "\n"
 }
 
 func generateGoStruct(
@@ -263,7 +309,8 @@ func generateGoStruct(
 			extraTags = ",timestamp_millis,timestamp(millisecond)"
 		}
 
-		goStruct += fmt.Sprintf("\n// %s: %s\n", fieldValue["caption"].(string), fieldValue["description"].(string))
+		description, _ := fieldValue["description"].(string)
+		goStruct += formatFieldComment(fieldValue["caption"].(string), description)
 		if required {
 			goStruct += fmt.Sprintf("%s %s `json:\"%s\" parquet:\"%s%s\"`\n", fieldTitle, fieldType, fieldName, fieldName, extraTags)
 			arrowFields += fmt.Sprintf("{Name: \"%s\", Type: %s, Nullable: false},\n", fieldName, arrowType)
